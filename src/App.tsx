@@ -164,9 +164,10 @@ export default function App() {
     email: "",
     checkIn: "",
     checkOut: "",
+    arrivalTime: "",
     guests: "2",
     childrenCount: "0",
-    roomType: "Bungalow 1 ou 2 personnes",
+    roomType: "Bungalow 1,2 pers.",
     airportTransport: "Non",
     currencyExchange: "Non",
     exchangeAmount: "",
@@ -341,25 +342,24 @@ export default function App() {
 
   const getEstimatedRate = (roomType: string, guestsStr: string): number => {
     let guestCount = 2;
-    if (guestsStr.includes("1")) guestCount = 1;
-    else if (guestsStr.includes("2")) guestCount = 2;
-    else if (guestsStr.includes("3")) guestCount = 3;
-    else if (guestsStr.includes("4")) guestCount = 4;
-    else if (guestsStr.includes("5")) guestCount = 5;
-    else {
-      const parsed = parseInt(guestsStr);
-      if (!isNaN(parsed)) guestCount = parsed;
+    const parsed = parseInt(guestsStr, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      guestCount = parsed;
     }
 
-    if (roomType.includes("Bungalow 1 ou 2")) {
+    if (
+      roomType.includes("Bungalow 1,2") || 
+      roomType.includes("1 ou 2") || 
+      (roomType.includes("Bungalow") && !roomType.includes("familiale") && !roomType.includes("3,4,5") && !roomType.includes("3, 4"))
+    ) {
       return guestCount === 1 ? 24000 : 31000;
-    } else if (roomType.includes("Familiale")) {
+    } else if (roomType.includes("familiale") || roomType.includes("Familiale")) {
       return guestCount <= 3 ? 42000 : 49000;
-    } else if (roomType.includes("pour 3, 4 ou 5")) {
+    } else if (roomType.includes("3,4,5") || roomType.includes("3, 4 ou 5")) {
       if (guestCount <= 3) return 42000;
       if (guestCount === 4) return 49000;
       return 56000;
-    } else if (roomType.includes("l'étage")) {
+    } else if (roomType.includes("étage") || roomType.includes("etage")) {
       if (guestCount === 1) return 27000;
       if (guestCount === 2) return 38000;
       return 48000;
@@ -367,11 +367,21 @@ export default function App() {
     return 24000;
   };
 
+  const isEarlyBirdDiscount = (checkInStr: string): boolean => {
+    if (!checkInStr) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const checkInDate = new Date(checkInStr);
+    if (isNaN(checkInDate.getTime())) return false;
+    const diffDays = Math.ceil((checkInDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+    return diffDays >= 30;
+  };
+
   // Format booking submit to official hotel WhatsApp
   const handleBookingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const { 
-      name, phone, email, checkIn, checkOut, guests, childrenCount,
+      name, phone, email, checkIn, checkOut, arrivalTime, guests, childrenCount,
       roomType, airportTransport, currencyExchange, exchangeAmount, exchangeCurrency, specialRequests 
     } = bookingForm;
 
@@ -382,7 +392,7 @@ export default function App() {
 
     const nights = countNights(checkIn, checkOut);
     if (nights <= 0) {
-      alert("La date de départ doit être strictement ultérieure à la date d'arrivée.");
+      alert("La date de départ doit être strictly ultérieure à la date d'arrivée.");
       return;
     }
 
@@ -394,7 +404,9 @@ export default function App() {
 
     // Dynamic price sheet based on room and guest counts
     const rateCFA = getEstimatedRate(roomType, guests);
-    const totalPriceCFA = rateCFA * nights;
+    const rawTotalPriceCFA = rateCFA * nights;
+    const earlyBird = isEarlyBirdDiscount(checkIn);
+    const totalPriceCFA = earlyBird ? Math.round(rawTotalPriceCFA * 0.9) : rawTotalPriceCFA;
 
     // Build perfect formatted message
     let messageText = `*DEMANDE DE RÉSERVATION - LE CHAMAMA*\n\n`;
@@ -404,19 +416,27 @@ export default function App() {
     messageText += `🏨 *Hébergement:* ${roomType}\n`;
     messageText += `📅 *Arrivée:* ${checkIn}\n`;
     messageText += `📅 *Départ:* ${checkOut}\n`;
+    if (arrivalTime) {
+      messageText += `🕒 *Heure d'arrivée estimée:* ${arrivalTime}\n`;
+    }
     messageText += `🌙 *Durée:* ${nights} nuit(s)\n`;
     messageText += `👥 *Voyageurs:* ${guests} adulte(s) | ${childrenCount} enfant(s)\n\n`;
     
     messageText += `🚀 *Services Exclusifs demandés:*\n`;
-    messageText += `✈️ *Navette Aéroport (Aller/Retour):* ${airportTransport}\n`;
-    messageText += `💱 *Besoin de Change (Devises):* ${currencyExchange === "Oui" ? `Oui (${exchangeAmount} ${exchangeCurrency})` : "Non"}\n\n`;
+    messageText += `✈️ *Navette Aéroport (Facturée en sus):* ${airportTransport}\n`;
+    messageText += `💱 *Besoin de Change:* ${currencyExchange === "Oui" ? `Oui (${exchangeAmount} ${exchangeCurrency})` : "Non"}\n\n`;
     
     if (specialRequests) {
       messageText += `📝 *Demandes Spéciales:* ${specialRequests}\n\n`;
     }
 
-    messageText += `💳 *Estimation financière:* ${totalPriceCFA.toLocaleString()} FCFA (~${Math.round(totalPriceCFA / 655.957)} €)\n`;
-    messageText += `_Note: Réservation synchronisée via Channel Manager._`;
+    if (earlyBird) {
+      messageText += `🎁 *Offre Réservation Anticipée:* -10% appliquée (Séjour à 30+ jours)\n`;
+      messageText += `💳 *Montant total:* ${totalPriceCFA.toLocaleString()} FCFA (au lieu de ${rawTotalPriceCFA.toLocaleString()} FCFA)\n`;
+    } else {
+      messageText += `💳 *Montant total:* ${totalPriceCFA.toLocaleString()} FCFA (~${Math.round(totalPriceCFA / 655.957)} €)\n`;
+    }
+    messageText += `_Note: Aucun acompte versé à la réservation. La totalité du séjour sera réglée à l'arrivée._`;
 
     const encodedMessage = encodeURIComponent(messageText);
     // WhatsApp contact number: +221 77 102 23 86
@@ -441,7 +461,7 @@ export default function App() {
   const ROOMS_DATA = [
     {
       id: "bungalow_simple",
-      name: "Bungalow 1 ou 2 personnes",
+      name: "Bungalow 1,2 pers.",
       subtitle: "Constructions typiques avec toit en paille",
       priceCFA: "24 000F / 31 000F",
       priceEUR: "37 / 47",
@@ -453,7 +473,7 @@ export default function App() {
     },
     {
       id: "chambre_familiale",
-      name: "Bungalow \"Chambre Familiale\"",
+      name: "Bungalow chambre familiale 3,4 pers",
       subtitle: "Constructions typiques avec toit en paille",
       priceCFA: "42 000F / 49 000F",
       priceEUR: "64 / 75",
@@ -465,7 +485,7 @@ export default function App() {
     },
     {
       id: "bungalow_quintuple",
-      name: "Bungalow pour 3, 4 ou 5 personnes",
+      name: "Bungalow 3,4,5 pers",
       subtitle: "Constructions typiques avec toit en paille",
       priceCFA: "42 000F / 49 000F / 56 000F",
       priceEUR: "64 / 75 / 85",
@@ -477,14 +497,14 @@ export default function App() {
     },
     {
       id: "chambre_etage",
-      name: "Chambres à l'étage",
+      name: "Chambre à l'étage 2,3 pers",
       subtitle: "Style classique et standing plus élevé",
       priceCFA: "27 000F / 38 000F / 48 000F",
       priceEUR: "41 / 58 / 73",
       capacity: "1, 2 ou 3 Personnes",
       size: "30 m²",
       images: [imgEtage1, imgEtage2, imgEtage3],
-      features: ["Style plus classique", "Salle de bain et WC séparés", "Lit confortable", "Climatisation & Télévision"],
+      features: ["Style plus classique", "Salle de bain et WC séparés", "un lit double + un lit simple", "Climatisation & Télévision"],
       description: "4 grandes chambres d'un style plus classique, d'un standing plus élevé, d'une dimension de 30m², à réserver pour 1, 2 ou 3 personnes. Mêmes équipements que les bungalows."
     }
   ];
@@ -556,12 +576,9 @@ export default function App() {
           <span>📅 CANAL SYNCHRONISÉ: Calendriers temps réel Booking.com & Airbnb consolidés</span>
         </div>
         <div className="hidden lg:flex items-center gap-6 divide-x divide-luxury-gold/30 pl-4 bg-luxury-brand">
-          <span className="pl-6 text-white text-[11px] font-semibold flex items-center gap-2">
+          <a href="#services" className="pl-6 text-white text-[11px] font-semibold flex items-center gap-2 hover:text-luxury-gold transition-colors">
             <Coins className="w-3.5 h-3.5 text-luxury-gold" />
-            1 EUR = 655.95 FCFA
-          </span>
-          <a href="#currency-tool" className="pl-4 hover:text-white transition-colors underline decoration-dotted text-[11px]">
-            Calculateur Change
+            Service Change Devises
           </a>
         </div>
       </div>
@@ -588,7 +605,7 @@ export default function App() {
           <nav className="hidden lg:flex items-center gap-8 text-xs font-display font-medium tracking-widest uppercase">
             <a href="#about" className={`transition-colors hover:text-luxury-gold ${scrolled ? "text-luxury-brand" : "text-white/90"}`}>L'Hôtel</a>
             <a href="#services" className={`transition-colors hover:text-luxury-gold ${scrolled ? "text-luxury-brand" : "text-white/90"}`}>Services Exclusifs</a>
-            <a href="#sections" className={`transition-colors hover:text-luxury-gold ${scrolled ? "text-luxury-brand" : "text-white/90"}`}>Nos Bungalows</a>
+            <a href="#sections" className={`transition-colors hover:text-luxury-gold ${scrolled ? "text-luxury-brand" : "text-white/90"}`}>Nos chambres</a>
             <a href="#gallery" className={`transition-colors hover:text-luxury-gold ${scrolled ? "text-luxury-brand" : "text-white/90"}`}>Galerie</a>
             <a href="#reviews" className={`transition-colors hover:text-luxury-gold ${scrolled ? "text-luxury-brand" : "text-white/90"}`}>Avis clients</a>
           </nav>
@@ -751,32 +768,50 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Dates Picker */}
-                  <div className="grid md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
+                  {/* Check-in / Check-out Times Notice */}
+                  <div className="bg-[#4a3e3d]/5 border border-luxury-gold/30 rounded-xl p-3 text-xs text-luxury-brand flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-luxury-gold shrink-0" />
+                      <span className="font-bold">Horaires du séjour :</span>
+                      <span>Arrivée à partir de 14h &mdash; Départ avant 12h</span>
+                    </div>
+                  </div>
+
+                  {/* Dates Picker & Arrival Time */}
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div className="space-y-1.5 md:col-span-2">
                       <label id="lbl-checkin" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080] flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-luxury-gold" /> Date d'Arrivée *
+                        <Calendar className="w-3.5 h-3.5 text-luxury-gold" /> Dates de Séjour (Arrivée & Départ) *
                       </label>
-                      <input 
-                        required
-                        type="date" 
-                        aria-labelledby="lbl-checkin"
-                        value={bookingForm.checkIn}
-                        onChange={(e) => setBookingForm({...bookingForm, checkIn: e.target.value})}
-                        className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3.5 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-sm transition-all" 
-                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <input 
+                          required
+                          type="date" 
+                          aria-label="Date d'arrivée"
+                          value={bookingForm.checkIn}
+                          onChange={(e) => setBookingForm({...bookingForm, checkIn: e.target.value})}
+                          className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
+                        />
+                        <input 
+                          required
+                          type="date" 
+                          aria-label="Date de départ"
+                          value={bookingForm.checkOut}
+                          onChange={(e) => setBookingForm({...bookingForm, checkOut: e.target.value})}
+                          className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
+                        />
+                      </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label id="lbl-checkout" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080] flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-luxury-gold" /> Date de Départ *
+                      <label id="lbl-arrtime" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080] flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-luxury-gold" /> Heure d'arrivée (optionnel)
                       </label>
                       <input 
-                        required
-                        type="date" 
-                        aria-labelledby="lbl-checkout"
-                        value={bookingForm.checkOut}
-                        onChange={(e) => setBookingForm({...bookingForm, checkOut: e.target.value})}
-                        className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3.5 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-sm transition-all" 
+                        type="time" 
+                        aria-labelledby="lbl-arrtime"
+                        value={bookingForm.arrivalTime}
+                        onChange={(e) => setBookingForm({...bookingForm, arrivalTime: e.target.value})}
+                        className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
                       />
                     </div>
                   </div>
@@ -784,16 +819,17 @@ export default function App() {
                   {/* Guests & Logements */}
                   <div className="grid md:grid-cols-3 gap-4">
                     <div className="space-y-1.5">
-                      <label id="lbl-type" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">Catégorie de Bungalow</label>
+                      <label id="lbl-type" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">Catégorie de Chambre</label>
                       <select 
                         aria-labelledby="lbl-type"
                         value={bookingForm.roomType}
                         onChange={(e) => setBookingForm({...bookingForm, roomType: e.target.value})}
                         className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3.5 outline-none text-sm text-[#4a3e3d]"
                       >
-                        <option value="Bungalow">Bungalow</option>
-                        <option value="Bungalow Confort Plus">Bungalow Confort Plus</option>
-                        <option value="Chambre Familiale">Chambre Familiale</option>
+                        <option value="Bungalow 1,2 pers.">Bungalow 1,2 pers.</option>
+                        <option value="Bungalow chambre familiale 3,4 pers">Bungalow chambre familiale 3,4 pers</option>
+                        <option value="Bungalow 3,4,5 pers">Bungalow 3,4,5 pers</option>
+                        <option value="Chambre à l'étage 2,3 pers">Chambre à l'étage 2,3 pers</option>
                       </select>
                     </div>
                     <div className="space-y-1.5">
@@ -808,6 +844,7 @@ export default function App() {
                         <option value="2">2 Adultes</option>
                         <option value="3">3 Adultes</option>
                         <option value="4">4 Adultes (Groupe)</option>
+                        <option value="5">5 Adultes (Groupe)</option>
                       </select>
                     </div>
                     <div className="space-y-1.5">
@@ -837,7 +874,7 @@ export default function App() {
                           <Plane className="w-4 h-4 text-luxury-gold" />
                           <span className="text-xs font-bold text-luxury-brand uppercase font-display tracking-wider">Transfert Aéroport</span>
                         </div>
-                        <p className="text-[11px] text-[#8a7a6e] mt-1 mb-2">Navette privée aller-retour AIBD - Niaga / Lac Rose.</p>
+                        <p className="text-[11px] text-[#8a7a6e] mt-1 mb-2">Service optionnel facturé en supplément (non inclus dans la chambre).</p>
                         <select 
                           value={bookingForm.airportTransport}
                           onChange={(e) => setBookingForm({...bookingForm, airportTransport: e.target.value})}
@@ -856,7 +893,7 @@ export default function App() {
                           <Coins className="w-4 h-4 text-luxury-gold" />
                           <span className="text-xs font-bold text-luxury-brand uppercase font-display tracking-wider">Change de Monnaie</span>
                         </div>
-                        <p className="text-[11px] text-[#8a7a6e] mt-1 mb-2">Service de conversion cash immédiat à la réception de l'hôtel.</p>
+                        <p className="text-[11px] text-[#8a7a6e] mt-1 mb-2">Service de conversion disponible directement à la réception.</p>
                         <div className="flex gap-2">
                           <select 
                             value={bookingForm.currencyExchange}
@@ -864,12 +901,12 @@ export default function App() {
                             className="bg-white border border-[#a38760]/20 rounded-lg p-2.5 text-xs outline-none"
                           >
                             <option value="Non">Non</option>
-                            <option value="Oui">Oui, je veux changer</option>
+                            <option value="Oui">Oui, je souhaite changer</option>
                           </select>
                           {bookingForm.currencyExchange === "Oui" && (
                             <input 
                               type="text" 
-                              placeholder="Montant Ex: 500"
+                              placeholder="Montant (ex: EUR/USD)"
                               value={bookingForm.exchangeAmount}
                               onChange={(e) => setBookingForm({...bookingForm, exchangeAmount: e.target.value})}
                               className="w-full bg-white border border-[#a38760]/20 rounded-lg p-2 text-xs focus:ring-1 focus:ring-luxury-gold outline-none"
@@ -892,25 +929,62 @@ export default function App() {
                     ></textarea>
                   </div>
 
-                  <div className="bg-[#FCFAF5] p-4 rounded-xl border border-luxury-gold/15 space-y-2.5 text-xs text-left">
-                    <div className="flex justify-between font-bold text-[#4a3e3d] text-sm">
-                      <span>Tarif estimé de votre hébergement:</span>
-                      <span className="text-luxury-gold font-display">
-                        {countNights(bookingForm.checkIn, bookingForm.checkOut) > 0 
-                          ? `${((bookingForm.roomType === "Bungalow" ? 28000 : (bookingForm.roomType === "Bungalow Confort Plus" ? 34000 : 45000)) * countNights(bookingForm.checkIn, bookingForm.checkOut)).toLocaleString()} FCFA`
-                          : "0 FCFA"
-                        }
+                  {/* Early Bird Discount Banner */}
+                  {isEarlyBirdDiscount(bookingForm.checkIn) && (
+                    <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl p-3.5 flex items-center gap-2.5 text-xs font-medium animate-fadeIn">
+                      <span className="text-lg">🎁</span>
+                      <div>
+                        <strong>Remise Réservation Anticipée (-10%) :</strong>
+                        <span className="block text-[11px] text-emerald-800">
+                          Votre date d'arrivée est dans plus de 30 jours, la réduction de 10% a été appliquée sur votre montant total !
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="bg-[#FCFAF5] p-5 rounded-2xl border border-luxury-gold/25 space-y-3 text-left shadow-sm">
+                    <div className="flex justify-between items-center font-bold text-luxury-brand text-sm md:text-base border-b border-[#E5D5C5]/30 pb-2">
+                      <span>Montant total :</span>
+                      <span className="text-luxury-gold font-display text-base md:text-lg">
+                        {(() => {
+                          const nights = countNights(bookingForm.checkIn, bookingForm.checkOut);
+                          if (nights <= 0) return "0 FCFA (Sélectionnez vos dates)";
+                          const rate = getEstimatedRate(bookingForm.roomType, bookingForm.guests);
+                          const rawTotal = rate * nights;
+                          if (isEarlyBirdDiscount(bookingForm.checkIn)) {
+                            const discounted = Math.round(rawTotal * 0.9);
+                            return (
+                              <div className="text-right">
+                                <span className="line-through text-gray-400 text-xs mr-2">{rawTotal.toLocaleString()} FCFA</span>
+                                <span className="text-emerald-700 font-bold">{discounted.toLocaleString()} FCFA</span>
+                                <span className="block text-[10px] text-emerald-600 font-normal">(-10% réservation anticipée)</span>
+                              </div>
+                            );
+                          }
+                          return `${rawTotal.toLocaleString()} FCFA (${rate.toLocaleString()} F/nuit × ${nights} nuit${nights > 1 ? 's' : ''})`;
+                        })()}
                       </span>
                     </div>
-                    <div className="flex flex-col sm:flex-row justify-between text-[11px] text-[#4a3e3d] pt-1.5 border-t border-[#E5D5C5]/20 gap-1">
-                      <span className="font-semibold text-gray-500">Modes de paiement acceptés :</span>
-                      <span className="font-bold text-luxury-gold">Carte bancaire, Euro ou monnaie locale</span>
+
+                    <div className="flex flex-col sm:flex-row justify-between text-xs text-[#4a3e3d] pt-1 gap-1 font-medium">
+                      <span className="text-gray-600 font-semibold">Modes de paiement acceptés :</span>
+                      <span className="font-bold text-luxury-brand">Carte bancaire, Euro ou monnaie locale</span>
                     </div>
-                    <div className="text-[10px] text-[#8a7a6e] leading-relaxed space-y-1 pt-1.5 border-t border-dashed border-[#E5D5C5]/30">
-                      <p>Vous ne versez rien à la réservation. Le règlement se fait à votre arrivée à l'hôtel. Paiement accepté en Fcfa, euros ou par carte bancaire.</p>
-                      <p className="italic text-luxury-gold font-medium">PS : Si annulation, merci de nous prévenir rapidement.</p>
+
+                    <div className="text-xs md:text-sm text-[#2D2726] leading-relaxed space-y-2 pt-2 border-t border-dashed border-[#E5D5C5]/40 font-normal">
+                      <p className="font-bold text-luxury-brand bg-luxury-gold/10 p-3 rounded-lg border-l-4 border-luxury-gold">
+                        Enfin, vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
+                      </p>
+                      <p className="text-gray-600 text-xs">
+                        Paiement accepté en FCFA, euros ou par carte bancaire.
+                      </p>
+                      <p className="italic text-luxury-gold font-semibold text-xs">
+                        PS : Si annulation, merci de nous prévenir rapidement.
+                      </p>
                     </div>
-                    <p className="text-gray-400 font-medium text-[9px]">La navette et le change de devises seront confirmés en personne avec notre réception.</p>
+                    <p className="text-gray-500 font-medium text-xs pt-1">
+                      Le transfert aéroport et le change de devises seront confirmés directement avec notre réception.
+                    </p>
                   </div>
 
                   {checkOverlappingDates(bookingForm.roomType, bookingForm.checkIn, bookingForm.checkOut) && (
@@ -1075,9 +1149,10 @@ export default function App() {
                     aria-label="Sélectionner le type de chambre"
                     className="bg-transparent border-none text-white text-xs outline-none cursor-pointer focus:ring-0 w-full"
                   >
-                    <option value="Bungalow" className="bg-[#2d2726]">Bungalow</option>
-                    <option value="Bungalow Confort Plus" className="bg-[#2d2726]">Bungalow Confort Plus</option>
-                    <option value="Chambre Familiale" className="bg-[#2d2726]">Chambre Familiale</option>
+                    <option value="Bungalow 1,2 pers." className="bg-[#2d2726]">Bungalow 1,2 pers.</option>
+                    <option value="Bungalow chambre familiale 3,4 pers" className="bg-[#2d2726]">Bungalow chambre familiale 3,4 pers</option>
+                    <option value="Bungalow 3,4,5 pers" className="bg-[#2d2726]">Bungalow 3,4,5 pers</option>
+                    <option value="Chambre à l'étage 2,3 pers" className="bg-[#2d2726]">Chambre à l'étage 2,3 pers</option>
                   </select>
                 </div>
               </div>
@@ -1131,6 +1206,12 @@ export default function App() {
             </h2>
           </div>
 
+          <div className="bg-luxury-gold/10 border-l-4 border-luxury-gold p-4 rounded-r-2xl my-4">
+            <p className="font-bold text-luxury-brand text-sm md:text-base leading-relaxed">
+              Enfin, vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
+            </p>
+          </div>
+
           <p className="text-gray-600 leading-relaxed text-sm md:text-base font-light font-sans">
             Niché dans le petit village de Niaga Peulh et à proximité du lac rose, l'hôtel ''Le CHAMAMA'' est un concept pensé pour le confort, le repos et la convivialité. Venez profiter d'un hébergement parfaitement équipé, vous détendre dans la piscine ou profiter du billard et du jeu de fléchettes. Wifi gratuite sur tout l'espace de l'hôtel. Cuisine locale ou européenne. Bar.
           </p>
@@ -1170,9 +1251,12 @@ export default function App() {
                   <Plane className="w-8 h-8" />
                 </div>
                 <h3 className="text-2xl font-serif text-luxury-brand mb-3">Navette Aéroport – Hôtel – Aéroport</h3>
-                <p className="text-[#8a7a6e] text-sm leading-relaxed font-light mb-6">
+                <p className="text-[#8a7a6e] text-sm leading-relaxed font-light mb-4">
                   Si vous le souhaitez, nous vous prenons en charge dès votre arrivée à l'aéroport. Un chauffeur vous y attendra et vous ramènera directement à l'hôtel.
                 </p>
+                <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs font-bold mb-6">
+                  ℹ️ Note : Le transfert aéroport est un service optionnel facturé en supplément (non inclus dans le prix de la chambre).
+                </div>
                 <ul className="space-y-2 text-xs text-luxury-brand font-medium mb-6">
                   <li className="flex items-center gap-2">
                     <Check className="w-4 h-4 text-luxury-gold" /> Véhicule climatisé
@@ -1243,12 +1327,12 @@ export default function App() {
             <span className="text-xs uppercase font-display tracking-[0.3em] text-luxury-gold font-bold">HÉBERGEMENT</span>
             <h2 className="text-4xl md:text-5xl font-serif text-luxury-brand font-normal tracking-tight">Nos Logements</h2>
             
-            <div className="bg-[#4a3e3d]/5 rounded-2xl p-5 border border-[#a38760]/10 max-w-2xl mx-auto text-left space-y-2">
-              <p className="text-luxury-brand font-medium text-sm text-center">
-                📋 <strong className="uppercase">Note générale :</strong> Toutes nos chambres sont climatisées, disposent d'une salle de bain privée, d'un lit avec moustiquaire et d'une télévision.
+            <div className="bg-white rounded-2xl p-6 border border-luxury-gold/30 shadow-md max-w-3xl mx-auto text-center space-y-3">
+              <p className="text-[#2D2726] text-sm md:text-base leading-relaxed font-normal">
+                Toutes nos chambres sont climatisées et disposent d'une salle de bain privée. Tous les lits sont équipés de moustiquaires. Télévision. Wifi gratuite dans tout l'hôtel.
               </p>
-              <p className="text-[#a39080] font-serif italic text-xs text-center font-bold">
-                * Nos tarifs s'entendent avec petit déjeuner compris
+              <p className="text-luxury-brand font-bold text-base md:text-lg tracking-wide border-t border-luxury-gold/20 pt-3">
+                Nos prix sont TTC et s'entendent avec petit déjeuner compris.
               </p>
             </div>
           </div>
@@ -1347,24 +1431,19 @@ export default function App() {
                         <span className="text-[10px] text-gray-400 font-mono italic shrink-0">~{room.priceEUR} €</span>
                       </div>
  
-                      <p className="text-gray-500 text-xs font-light leading-relaxed">
+                      <p className="text-[#2D2726] text-sm font-normal leading-relaxed">
                         {room.description}
                       </p>
                     </div>
  
                     <div>
                       {/* Room features grid list */}
-                      <div className="flex flex-wrap gap-1 py-2">
-                        {room.features.slice(0, 3).map((f, i) => (
-                          <span key={i} className="bg-[#FCFAF5] border border-[#a38760]/10 text-luxury-brand text-[9px] uppercase font-semibold font-display px-2 py-0.5 rounded-md">
+                      <div className="flex flex-wrap gap-1.5 py-2">
+                        {room.features.map((f, i) => (
+                          <span key={i} className="bg-[#4a3e3d]/10 border border-luxury-brand/20 text-luxury-brand text-[10px] font-semibold font-display px-2.5 py-1 rounded-md">
                             {f}
                           </span>
                         ))}
-                        {room.features.length > 3 && (
-                          <span className="bg-[#4a3e3d]/5 text-luxury-brand text-[9px] uppercase font-semibold font-display px-2 py-0.5 rounded-md">
-                            +{room.features.length - 3} Plus
-                          </span>
-                        )}
                       </div>
  
                       <div className="pt-3 border-t border-[#E5D5C5]/20 flex items-center justify-between text-[11px] font-medium text-gray-500 mb-4">
