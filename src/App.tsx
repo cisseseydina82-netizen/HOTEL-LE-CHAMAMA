@@ -973,7 +973,7 @@ export default function App() {
 
                     <div className="text-xs md:text-sm text-[#2D2726] leading-relaxed space-y-2 pt-2 border-t border-dashed border-[#E5D5C5]/40 font-normal">
                       <p className="font-bold text-luxury-brand bg-luxury-gold/10 p-3 rounded-lg border-l-4 border-luxury-gold">
-                        Enfin, vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
+                        Vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
                       </p>
                       <p className="text-gray-600 text-xs">
                         Paiement accepté en FCFA, euros ou par carte bancaire.
@@ -1208,7 +1208,7 @@ export default function App() {
 
           <div className="bg-luxury-gold/10 border-l-4 border-luxury-gold p-4 rounded-r-2xl my-4">
             <p className="font-bold text-luxury-brand text-sm md:text-base leading-relaxed">
-              Enfin, vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
+              Vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
             </p>
           </div>
 
