@@ -26,7 +26,10 @@ import {
   Check,
   Lock,
   Info,
-  CalendarCheck
+  CalendarCheck,
+  Plus,
+  Trash2,
+  Sparkles
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -157,17 +160,34 @@ export default function App() {
     chambre_etage: 0
   });
 
-  // Booking & Selection Form States
+  // Room booking item interface for Multi-Room reservations
+  interface BookingRoomItem {
+    id: string;
+    roomType: string;
+    checkIn: string;
+    checkOut: string;
+    arrivalTime: string;
+    guests: string;
+    childrenCount: string;
+  }
+
+  // Booking & Selection Form States (Supports multiple rooms)
+  const [bookingRooms, setBookingRooms] = useState<BookingRoomItem[]>([
+    {
+      id: "room-1",
+      roomType: "Bungalow 1,2 pers.",
+      checkIn: "",
+      checkOut: "",
+      arrivalTime: "",
+      guests: "2",
+      childrenCount: "0"
+    }
+  ]);
+
   const [bookingForm, setBookingForm] = useState({
     name: "",
     phone: "",
     email: "",
-    checkIn: "",
-    checkOut: "",
-    arrivalTime: "",
-    guests: "2",
-    childrenCount: "0",
-    roomType: "Bungalow 1,2 pers.",
     airportTransport: "Non",
     currencyExchange: "Non",
     exchangeAmount: "",
@@ -367,92 +387,166 @@ export default function App() {
     return 24000;
   };
 
-  const isEarlyBirdDiscount = (checkInStr: string): boolean => {
+  // Helper methods for multi-room booking
+  const addBookingRoom = () => {
+    const lastRoom = bookingRooms[bookingRooms.length - 1];
+    const newRoom: BookingRoomItem = {
+      id: `room-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      roomType: "Bungalow 1,2 pers.",
+      checkIn: lastRoom?.checkIn || "",
+      checkOut: lastRoom?.checkOut || "",
+      arrivalTime: lastRoom?.arrivalTime || "",
+      guests: "2",
+      childrenCount: "0"
+    };
+    setBookingRooms(prev => [...prev, newRoom]);
+  };
+
+  const removeBookingRoom = (id: string) => {
+    if (bookingRooms.length <= 1) return;
+    setBookingRooms(prev => prev.filter(r => r.id !== id));
+  };
+
+  const updateBookingRoom = (id: string, field: keyof BookingRoomItem, value: string) => {
+    setBookingRooms(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
+  };
+
+  // Helper to check if Flash Discount (-20%) is applicable
+  // Condition: check-in is at least 60 days from today AND booking is made before or on 31 October 2026
+  const isFlashDiscountApplicable = (checkInStr: string): boolean => {
     if (!checkInStr) return false;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
+    const deadline = new Date("2026-10-31T23:59:59");
+    if (today > deadline) return false;
+
     const checkInDate = new Date(checkInStr);
     if (isNaN(checkInDate.getTime())) return false;
+
     const diffDays = Math.ceil((checkInDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
-    return diffDays >= 30;
+    return diffDays >= 60;
   };
 
-  // Format booking submit to official hotel WhatsApp
+  // Calculate detailed summary for all rooms combined
+  const calculateBookingSummary = () => {
+    let rawTotalPrice = 0;
+    let anyRoomHasFlashPromo = false;
+
+    const roomSummaries = bookingRooms.map((room, index) => {
+      const nights = countNights(room.checkIn, room.checkOut);
+      const rate = getEstimatedRate(room.roomType, room.guests);
+      const roomTotal = nights > 0 ? rate * nights : 0;
+      rawTotalPrice += roomTotal;
+      if (isFlashDiscountApplicable(room.checkIn)) {
+        anyRoomHasFlashPromo = true;
+      }
+      return {
+        roomNumber: index + 1,
+        room,
+        nights,
+        rate,
+        roomTotal
+      };
+    });
+
+    const isFlashDiscount = anyRoomHasFlashPromo && rawTotalPrice > 0;
+    const discountAmount = isFlashDiscount ? Math.round(rawTotalPrice * 0.20) : 0;
+    const finalTotalPrice = rawTotalPrice - discountAmount;
+
+    return {
+      roomSummaries,
+      rawTotalPrice,
+      isFlashDiscount,
+      discountAmount,
+      finalTotalPrice
+    };
+  };
+
+  // Format booking submit to official hotel WhatsApp with Multi-Room & Flash Discount support
   const handleBookingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const { 
-      name, phone, email, checkIn, checkOut, arrivalTime, guests, childrenCount,
-      roomType, airportTransport, currencyExchange, exchangeAmount, exchangeCurrency, specialRequests 
+      name, phone, email, airportTransport, currencyExchange, exchangeAmount, exchangeCurrency, specialRequests 
     } = bookingForm;
 
-    if (!name || !phone || !checkIn || !checkOut) {
-      alert("Veuillez remplir les informations indispensables pour votre réservation.");
+    if (!name || !phone) {
+      alert("Veuillez remplir votre nom complet et votre numéro WhatsApp.");
       return;
     }
 
-    const nights = countNights(checkIn, checkOut);
-    if (nights <= 0) {
-      alert("La date de départ doit être strictly ultérieure à la date d'arrivée.");
-      return;
+    // Validate each room
+    for (let i = 0; i < bookingRooms.length; i++) {
+      const room = bookingRooms[i];
+      if (!room.checkIn || !room.checkOut) {
+        alert(`Veuillez sélectionner les dates d'arrivée et de départ pour la Chambre ${i + 1}.`);
+        return;
+      }
+      const nights = countNights(room.checkIn, room.checkOut);
+      if (nights <= 0) {
+        alert(`La date de départ de la Chambre ${i + 1} doit être strictement ultérieure à la date d'arrivée.`);
+        return;
+      }
+      if (checkOverlappingDates(room.roomType, room.checkIn, room.checkOut)) {
+        alert(`⚠️ Désolé! La catégorie de chambre (${room.roomType}) pour la Chambre ${i + 1} est déjà occupée ou bloquée par l'intégration Booking.com pour les dates sélectionnées. Veuillez choisir une autre période.`);
+        return;
+      }
     }
 
-    // Check dates overlap with Booking.com or other existing reservations
-    if (checkOverlappingDates(roomType, checkIn, checkOut)) {
-      alert(`⚠️ Désolé! Cette catégorie de chambre (${roomType}) est déjà occupée ou bloquée par l'intégration Booking.com pour les dates sélectionnées. Veuillez choisir une autre période.`);
-      return;
-    }
-
-    // Dynamic price sheet based on room and guest counts
-    const rateCFA = getEstimatedRate(roomType, guests);
-    const rawTotalPriceCFA = rateCFA * nights;
-    const earlyBird = isEarlyBirdDiscount(checkIn);
-    const totalPriceCFA = earlyBird ? Math.round(rawTotalPriceCFA * 0.9) : rawTotalPriceCFA;
+    const summary = calculateBookingSummary();
 
     // Build perfect formatted message
     let messageText = `*DEMANDE DE RÉSERVATION - LE CHAMAMA*\n\n`;
     messageText += `👤 *Client:* ${name}\n`;
     messageText += `📞 *Téléphone:* ${phone}\n`;
     messageText += `✉️ *Email:* ${email || "Non communiqué"}\n\n`;
-    messageText += `🏨 *Hébergement:* ${roomType}\n`;
-    messageText += `📅 *Arrivée:* ${checkIn}\n`;
-    messageText += `📅 *Départ:* ${checkOut}\n`;
-    if (arrivalTime) {
-      messageText += `🕒 *Heure d'arrivée estimée:* ${arrivalTime}\n`;
-    }
-    messageText += `🌙 *Durée:* ${nights} nuit(s)\n`;
-    messageText += `👥 *Voyageurs:* ${guests} adulte(s) | ${childrenCount} enfant(s)\n\n`;
     
-    messageText += `🚀 *Services Exclusifs demandés:*\n`;
-    messageText += `✈️ *Navette Aéroport (Facturée en sus):* ${airportTransport}\n`;
+    messageText += `🏨 *HÉBERGEMENT (${bookingRooms.length} chambre${bookingRooms.length > 1 ? "s" : ""}):*\n`;
+    summary.roomSummaries.forEach((rs) => {
+      messageText += `\n• *Chambre ${rs.roomNumber}:* ${rs.room.roomType}\n`;
+      messageText += `  📅 *Arrivée:* ${rs.room.checkIn} ${rs.room.arrivalTime ? `(Heure prévue: ${rs.room.arrivalTime})` : ""}\n`;
+      messageText += `  📅 *Départ:* ${rs.room.checkOut}\n`;
+      messageText += `  🌙 *Durée:* ${rs.nights} nuit(s)\n`;
+      messageText += `  👥 *Voyageurs:* ${rs.room.guests} adulte(s) | ${rs.room.childrenCount} enfant(s)\n`;
+      messageText += `  💰 *Sous-total hébergement:* ${rs.roomTotal.toLocaleString()} FCFA (${rs.rate.toLocaleString()} F/nuit)\n`;
+    });
+
+    messageText += `\n🚀 *Services Exclusifs demandés:*\n`;
+    messageText += `✈️ *Navette Aéroport (Facturée en sus):* ${airportTransport} (30 000 FCFA / trajet 40km, 5 places)\n`;
     messageText += `💱 *Besoin de Change:* ${currencyExchange === "Oui" ? `Oui (${exchangeAmount} ${exchangeCurrency})` : "Non"}\n\n`;
     
     if (specialRequests) {
       messageText += `📝 *Demandes Spéciales:* ${specialRequests}\n\n`;
     }
 
-    if (earlyBird) {
-      messageText += `🎁 *Offre Réservation Anticipée:* -10% appliquée (Séjour à 30+ jours)\n`;
-      messageText += `💳 *Montant total:* ${totalPriceCFA.toLocaleString()} FCFA (au lieu de ${rawTotalPriceCFA.toLocaleString()} FCFA)\n`;
+    if (summary.isFlashDiscount) {
+      messageText += `🎉 *Remise Flash Anticipée (-20%) appliquée !* (Réservation à 60+ jours d'avance jusqu'au 31 oct. 2026)\n`;
+      messageText += `💳 *Prix initial :* ${summary.rawTotalPrice.toLocaleString()} FCFA\n`;
+      messageText += `🎁 *Remise Flash (-20%) :* -${summary.discountAmount.toLocaleString()} FCFA\n`;
+      messageText += `💳 *MONTANT TOTAL À PAYER :* ${summary.finalTotalPrice.toLocaleString()} FCFA (~${Math.round(summary.finalTotalPrice / 655.957)} €)\n\n`;
     } else {
-      messageText += `💳 *Montant total:* ${totalPriceCFA.toLocaleString()} FCFA (~${Math.round(totalPriceCFA / 655.957)} €)\n`;
+      messageText += `💳 *MONTANT TOTAL À PAYER :* ${summary.finalTotalPrice.toLocaleString()} FCFA (~${Math.round(summary.finalTotalPrice / 655.957)} €)\n\n`;
     }
-    messageText += `_Note: Aucun acompte versé à la réservation. La totalité du séjour sera réglée à l'arrivée._`;
+    
+    messageText += `_Note: Vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel._`;
 
     const encodedMessage = encodeURIComponent(messageText);
     // WhatsApp contact number: +221 77 102 23 86
     window.open(`https://wa.me/221771022386?text=${encodedMessage}`, "_blank");
     
-    // Add the reservation is automatically booked/blocked locally
-    const newReservation: SyncReservation = {
-      id: `WEB-${Math.floor(10000 + Math.random() * 90000)}`,
-      roomName: roomType,
-      source: "Direct Website",
-      checkIn: checkIn,
-      checkOut: checkOut,
-      status: "Blocked",
-      synchronizedAt: "À l'instant"
-    };
-    setSyncedReservations(prev => [newReservation, ...prev]);
+    // Add the reservations locally
+    bookingRooms.forEach((room, idx) => {
+      const newReservation: SyncReservation = {
+        id: `WEB-${Math.floor(10000 + Math.random() * 90000)}-${idx + 1}`,
+        roomName: room.roomType,
+        source: "Direct Website",
+        checkIn: room.checkIn,
+        checkOut: room.checkOut,
+        status: "Blocked",
+        synchronizedAt: "À l'instant"
+      };
+      setSyncedReservations(prev => [newReservation, ...prev]);
+    });
 
     setIsBookingOpen(false);
   };
@@ -777,90 +871,189 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Dates Picker & Arrival Time */}
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="space-y-1.5 md:col-span-2">
-                      <label id="lbl-checkin" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080] flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-luxury-gold" /> Dates de Séjour (Arrivée & Départ) *
-                      </label>
-                      <div className="grid grid-cols-2 gap-2">
-                        <input 
-                          required
-                          type="date" 
-                          aria-label="Date d'arrivée"
-                          value={bookingForm.checkIn}
-                          onChange={(e) => setBookingForm({...bookingForm, checkIn: e.target.value})}
-                          className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
-                        />
-                        <input 
-                          required
-                          type="date" 
-                          aria-label="Date de départ"
-                          value={bookingForm.checkOut}
-                          onChange={(e) => setBookingForm({...bookingForm, checkOut: e.target.value})}
-                          className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
-                        />
+                  {/* Multi-Room Booking Section */}
+                  <div className="space-y-4 pt-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <CalendarCheck className="w-4 h-4 text-luxury-gold" />
+                        <h3 className="text-xs font-display font-bold uppercase tracking-widest text-luxury-brand">
+                          Hébergements ({bookingRooms.length} chambre{bookingRooms.length > 1 ? "s" : ""})
+                        </h3>
                       </div>
+                      <span className="text-[11px] text-[#a39080] font-medium">
+                        Ajoutez autant de chambres que nécessaire
+                      </span>
                     </div>
-                    <div className="space-y-1.5">
-                      <label id="lbl-arrtime" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080] flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5 text-luxury-gold" /> Heure d'arrivée (optionnel)
-                      </label>
-                      <input 
-                        type="time" 
-                        aria-labelledby="lbl-arrtime"
-                        value={bookingForm.arrivalTime}
-                        onChange={(e) => setBookingForm({...bookingForm, arrivalTime: e.target.value})}
-                        className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
-                      />
-                    </div>
-                  </div>
 
-                  {/* Guests & Logements */}
-                  <div className="grid md:grid-cols-3 gap-4">
-                    <div className="space-y-1.5">
-                      <label id="lbl-type" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">Catégorie de Chambre</label>
-                      <select 
-                        aria-labelledby="lbl-type"
-                        value={bookingForm.roomType}
-                        onChange={(e) => setBookingForm({...bookingForm, roomType: e.target.value})}
-                        className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3.5 outline-none text-sm text-[#4a3e3d]"
-                      >
-                        <option value="Bungalow 1,2 pers.">Bungalow 1,2 pers.</option>
-                        <option value="Bungalow chambre familiale 3,4 pers">Bungalow chambre familiale 3,4 pers</option>
-                        <option value="Bungalow 3,4,5 pers">Bungalow 3,4,5 pers</option>
-                        <option value="Chambre à l'étage 2,3 pers">Chambre à l'étage 2,3 pers</option>
-                      </select>
+                    <div className="space-y-4">
+                      {bookingRooms.map((room, index) => {
+                        const roomNights = countNights(room.checkIn, room.checkOut);
+                        const roomRate = getEstimatedRate(room.roomType, room.guests);
+                        const roomTotal = roomNights > 0 ? roomRate * roomNights : 0;
+                        const isRoomPromo = isFlashDiscountApplicable(room.checkIn);
+                        const isBlocked = checkOverlappingDates(room.roomType, room.checkIn, room.checkOut);
+
+                        return (
+                          <div 
+                            key={room.id}
+                            className="bg-[#FCFAF5] border border-luxury-gold/25 rounded-2xl p-4 md:p-5 space-y-4 relative transition-all"
+                          >
+                            <div className="flex items-center justify-between pb-2 border-b border-[#E5D5C5]/30">
+                              <div className="flex items-center gap-2">
+                                <span className="w-6 h-6 rounded-full bg-luxury-brand text-luxury-gold text-xs font-bold flex items-center justify-center font-display">
+                                  {index + 1}
+                                </span>
+                                <span className="font-serif font-bold text-luxury-brand text-sm md:text-base">
+                                  Chambre {index + 1}
+                                </span>
+                                {isRoomPromo && (
+                                  <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
+                                    <Sparkles className="w-3 h-3 text-emerald-600" />
+                                    Remise Flash 20%
+                                  </span>
+                                )}
+                              </div>
+
+                              {bookingRooms.length > 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() => removeBookingRoom(room.id)}
+                                  className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg text-xs flex items-center gap-1 font-medium transition-colors"
+                                  title="Supprimer cette chambre"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span className="hidden sm:inline text-[11px]">Supprimer</span>
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Row 1: Dates & Arrival Time */}
+                            <div className="grid md:grid-cols-3 gap-3">
+                              <div className="space-y-1 md:col-span-2">
+                                <label className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080] flex items-center gap-1">
+                                  <Calendar className="w-3 h-3 text-luxury-gold" /> Dates (Arrivée & Départ) *
+                                </label>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <input 
+                                    required
+                                    type="date" 
+                                    aria-label={`Date d'arrivée chambre ${index + 1}`}
+                                    value={room.checkIn}
+                                    onChange={(e) => updateBookingRoom(room.id, "checkIn", e.target.value)}
+                                    className="w-full bg-white border border-[#a38760]/20 rounded-xl p-2.5 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
+                                  />
+                                  <input 
+                                    required
+                                    type="date" 
+                                    aria-label={`Date de départ chambre ${index + 1}`}
+                                    value={room.checkOut}
+                                    onChange={(e) => updateBookingRoom(room.id, "checkOut", e.target.value)}
+                                    className="w-full bg-white border border-[#a38760]/20 rounded-xl p-2.5 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080] flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-luxury-gold" /> Heure d'arrivée
+                                </label>
+                                <input 
+                                  type="time" 
+                                  aria-label={`Heure d'arrivée chambre ${index + 1}`}
+                                  value={room.arrivalTime}
+                                  onChange={(e) => updateBookingRoom(room.id, "arrivalTime", e.target.value)}
+                                  className="w-full bg-white border border-[#a38760]/20 rounded-xl p-2.5 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
+                                />
+                              </div>
+                            </div>
+
+                            {/* Row 2: Room Type, Adults, Children */}
+                            <div className="grid md:grid-cols-3 gap-3">
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">
+                                  Catégorie de Chambre *
+                                </label>
+                                <select 
+                                  value={room.roomType}
+                                  onChange={(e) => updateBookingRoom(room.id, "roomType", e.target.value)}
+                                  className="w-full bg-white border border-[#a38760]/20 rounded-xl p-2.5 outline-none text-xs text-[#4a3e3d]"
+                                >
+                                  <option value="Bungalow 1,2 pers.">Bungalow 1,2 pers.</option>
+                                  <option value="Bungalow chambre familiale 3,4 pers">Bungalow chambre familiale 3,4 pers</option>
+                                  <option value="Bungalow 3,4,5 pers">Bungalow 3,4,5 pers</option>
+                                  <option value="Chambre à l'étage 2,3 pers">Chambre à l'étage 2,3 pers</option>
+                                </select>
+                              </div>
+
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">
+                                  Adultes
+                                </label>
+                                <select 
+                                  value={room.guests}
+                                  onChange={(e) => updateBookingRoom(room.id, "guests", e.target.value)}
+                                  className="w-full bg-white border border-[#a38760]/20 rounded-xl p-2.5 outline-none text-xs text-[#4a3e3d]"
+                                >
+                                  <option value="1">1 Adulte</option>
+                                  <option value="2">2 Adultes</option>
+                                  <option value="3">3 Adultes</option>
+                                  <option value="4">4 Adultes (Groupe)</option>
+                                  <option value="5">5 Adultes (Groupe)</option>
+                                </select>
+                              </div>
+
+                              <div className="space-y-1">
+                                <label className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">
+                                  Enfants (-12 ans)
+                                </label>
+                                <select 
+                                  value={room.childrenCount}
+                                  onChange={(e) => updateBookingRoom(room.id, "childrenCount", e.target.value)}
+                                  className="w-full bg-white border border-[#a38760]/20 rounded-xl p-2.5 outline-none text-xs text-[#4a3e3d]"
+                                >
+                                  <option value="0">Aucun</option>
+                                  <option value="1">1 Enfant</option>
+                                  <option value="2">2 Enfants</option>
+                                  <option value="3">3 Enfants</option>
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Single room pricing & status footer */}
+                            <div className="flex flex-wrap items-center justify-between pt-2 text-xs border-t border-[#E5D5C5]/20 text-[#4a3e3d]">
+                              <span>
+                                {roomNights > 0 ? (
+                                  <span className="font-medium text-gray-600">
+                                    {roomNights} nuit{roomNights > 1 ? "s" : ""} &times; {roomRate.toLocaleString()} FCFA/nuit
+                                  </span>
+                                ) : (
+                                  <span className="text-gray-400 italic text-[11px]">Choisissez les dates de cette chambre</span>
+                                )}
+                              </span>
+                              <span className="font-bold text-luxury-brand font-display">
+                                Sous-total : {roomTotal.toLocaleString()} FCFA
+                              </span>
+                            </div>
+
+                            {isBlocked && (
+                              <div className="bg-amber-100/90 text-amber-900 border border-amber-300 rounded-xl p-2.5 text-xs">
+                                ⚠️ Cette catégorie de chambre est indisponible pour ces dates (synchronisation Booking.com/iCal).
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="space-y-1.5">
-                      <label id="lbl-adults" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">Adultes</label>
-                      <select 
-                        aria-labelledby="lbl-adults"
-                        value={bookingForm.guests}
-                        onChange={(e) => setBookingForm({...bookingForm, guests: e.target.value})}
-                        className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3.5 outline-none text-sm text-[#4a3e3d]"
-                      >
-                        <option value="1">1 Adulte</option>
-                        <option value="2">2 Adultes</option>
-                        <option value="3">3 Adultes</option>
-                        <option value="4">4 Adultes (Groupe)</option>
-                        <option value="5">5 Adultes (Groupe)</option>
-                      </select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <label id="lbl-children" className="text-[10px] font-sans font-bold uppercase tracking-widest text-[#a39080]">Enfants (-12 ans)</label>
-                      <select 
-                        aria-labelledby="lbl-children"
-                        value={bookingForm.childrenCount}
-                        onChange={(e) => setBookingForm({...bookingForm, childrenCount: e.target.value})}
-                        className="w-full bg-[#FCFAF5] border border-[#a38760]/20 rounded-xl p-3.5 outline-none text-sm text-[#4a3e3d]"
-                      >
-                        <option value="0">Aucun</option>
-                        <option value="1">1 Enfant</option>
-                        <option value="2">2 Enfants</option>
-                        <option value="3">3 Enfants</option>
-                      </select>
-                    </div>
+
+                    {/* Add another room button */}
+                    <button
+                      type="button"
+                      onClick={addBookingRoom}
+                      className="w-full py-3.5 px-4 border-2 border-dashed border-luxury-gold/40 hover:border-luxury-gold bg-luxury-gold/5 hover:bg-luxury-gold/10 text-luxury-brand rounded-2xl font-display font-bold uppercase tracking-wider text-xs flex items-center justify-center gap-2 transition-all"
+                    >
+                      <Plus className="w-4 h-4 text-luxury-gold" />
+                      Ajouter une autre chambre
+                    </button>
                   </div>
 
                   {/* Specific Special Extras Requested by Hotel Owner */}
@@ -874,7 +1067,9 @@ export default function App() {
                           <Plane className="w-4 h-4 text-luxury-gold" />
                           <span className="text-xs font-bold text-luxury-brand uppercase font-display tracking-wider">Transfert Aéroport</span>
                         </div>
-                        <p className="text-[11px] text-[#8a7a6e] mt-1 mb-2">Service optionnel facturé en supplément (non inclus dans la chambre).</p>
+                        <p className="text-[11px] text-[#8a7a6e] mt-1 mb-2">
+                          Tarif : 30 000 FCFA (~45€) — 40km (véhicule 5 places). Facturé en supplément.
+                        </p>
                         <select 
                           value={bookingForm.airportTransport}
                           onChange={(e) => setBookingForm({...bookingForm, airportTransport: e.target.value})}
@@ -929,90 +1124,143 @@ export default function App() {
                     ></textarea>
                   </div>
 
-                  {/* Early Bird Discount Banner */}
-                  {isEarlyBirdDiscount(bookingForm.checkIn) && (
-                    <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl p-3.5 flex items-center gap-2.5 text-xs font-medium animate-fadeIn">
-                      <span className="text-lg">🎁</span>
-                      <div>
-                        <strong>Remise Réservation Anticipée (-10%) :</strong>
-                        <span className="block text-[11px] text-emerald-800">
-                          Votre date d'arrivée est dans plus de 30 jours, la réduction de 10% a été appliquée sur votre montant total !
-                        </span>
-                      </div>
-                    </div>
-                  )}
+                  {/* Summary and Calculation Box */}
+                  {(() => {
+                    const summary = calculateBookingSummary();
+                    const anyBlocked = bookingRooms.some(r => checkOverlappingDates(r.roomType, r.checkIn, r.checkOut));
 
-                  <div className="bg-[#FCFAF5] p-5 rounded-2xl border border-luxury-gold/25 space-y-3 text-left shadow-sm">
-                    <div className="flex justify-between items-center font-bold text-luxury-brand text-sm md:text-base border-b border-[#E5D5C5]/30 pb-2">
-                      <span>Montant total :</span>
-                      <span className="text-luxury-gold font-display text-base md:text-lg">
-                        {(() => {
-                          const nights = countNights(bookingForm.checkIn, bookingForm.checkOut);
-                          if (nights <= 0) return "0 FCFA (Sélectionnez vos dates)";
-                          const rate = getEstimatedRate(bookingForm.roomType, bookingForm.guests);
-                          const rawTotal = rate * nights;
-                          if (isEarlyBirdDiscount(bookingForm.checkIn)) {
-                            const discounted = Math.round(rawTotal * 0.9);
-                            return (
-                              <div className="text-right">
-                                <span className="line-through text-gray-400 text-xs mr-2">{rawTotal.toLocaleString()} FCFA</span>
-                                <span className="text-emerald-700 font-bold">{discounted.toLocaleString()} FCFA</span>
-                                <span className="block text-[10px] text-emerald-600 font-normal">(-10% réservation anticipée)</span>
+                    return (
+                      <>
+                        {/* Flash Discount Highlight Banner if applicable */}
+                        {summary.isFlashDiscount && (
+                          <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl p-4 flex items-start gap-3 text-xs animate-fadeIn">
+                            <span className="text-xl">🎉</span>
+                            <div>
+                              <strong className="text-emerald-900 text-sm block font-bold">
+                                Remise Flash Anticipée (-20%) activée !
+                              </strong>
+                              <p className="text-[11px] text-emerald-800 mt-0.5 leading-relaxed">
+                                Votre réservation est effectuée au moins 60 jours avant la date d'arrivée. La réduction exceptionnelle de 20% a été appliquée sur l'ensemble de votre séjour ! (Offre valable jusqu'au 31 octobre 2026).
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="bg-[#FCFAF5] p-5 rounded-2xl border border-luxury-gold/25 space-y-4 text-left shadow-sm">
+                          {/* Itemized rooms summary */}
+                          <div className="space-y-2 border-b border-[#E5D5C5]/30 pb-3">
+                            <span className="text-[11px] font-bold uppercase tracking-widest text-[#a39080] block">
+                              Détail du calcul ({bookingRooms.length} chambre{bookingRooms.length > 1 ? "s" : ""})
+                            </span>
+                            {summary.roomSummaries.map((rs) => (
+                              <div key={rs.room.id} className="flex justify-between items-center text-xs text-[#4a3e3d]">
+                                <span>
+                                  Chambre {rs.roomNumber} ({rs.room.roomType})
+                                  {rs.nights > 0 && (
+                                    <span className="text-gray-500 text-[11px]"> &bull; {rs.nights} nuit{rs.nights > 1 ? "s" : ""}</span>
+                                  )}
+                                </span>
+                                <span className="font-semibold text-luxury-brand">
+                                  {rs.roomTotal.toLocaleString()} FCFA
+                                </span>
                               </div>
-                            );
-                          }
-                          return `${rawTotal.toLocaleString()} FCFA (${rate.toLocaleString()} F/nuit × ${nights} nuit${nights > 1 ? 's' : ''})`;
-                        })()}
-                      </span>
-                    </div>
+                            ))}
+                          </div>
 
-                    <div className="flex flex-col sm:flex-row justify-between text-xs text-[#4a3e3d] pt-1 gap-1 font-medium">
-                      <span className="text-gray-600 font-semibold">Modes de paiement acceptés :</span>
-                      <span className="font-bold text-luxury-brand">Carte bancaire, Euro ou monnaie locale</span>
-                    </div>
+                          {/* Pricing totals */}
+                          <div className="space-y-2">
+                            {summary.isFlashDiscount ? (
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center text-xs md:text-sm text-gray-500">
+                                  <span>Prix initial :</span>
+                                  <span className="line-through font-semibold">{summary.rawTotalPrice.toLocaleString()} FCFA</span>
+                                </div>
+                                <div className="flex justify-between items-center text-xs md:text-sm text-emerald-700 font-bold">
+                                  <span className="flex items-center gap-1">
+                                    <Sparkles className="w-3.5 h-3.5" />
+                                    Remise Flash (-20%) :
+                                  </span>
+                                  <span>-{summary.discountAmount.toLocaleString()} FCFA</span>
+                                </div>
+                                <div className="flex justify-between items-center font-bold text-luxury-brand text-sm md:text-base pt-2 border-t border-luxury-gold/20">
+                                  <span>Montant total à payer :</span>
+                                  <div className="text-right">
+                                    <span className="text-luxury-gold font-display text-lg md:text-xl block">
+                                      {summary.finalTotalPrice.toLocaleString()} FCFA
+                                    </span>
+                                    <span className="text-xs text-gray-500 font-normal">
+                                      (~{Math.round(summary.finalTotalPrice / 655.957)} €)
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex justify-between items-center font-bold text-luxury-brand text-sm md:text-base">
+                                <span>Montant total à payer :</span>
+                                <div className="text-right">
+                                  <span className="text-luxury-gold font-display text-lg md:text-xl block">
+                                    {summary.finalTotalPrice.toLocaleString()} FCFA
+                                  </span>
+                                  {summary.finalTotalPrice > 0 && (
+                                    <span className="text-xs text-gray-500 font-normal">
+                                      (~{Math.round(summary.finalTotalPrice / 655.957)} €)
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                          </div>
 
-                    <div className="text-xs md:text-sm text-[#2D2726] leading-relaxed space-y-2 pt-2 border-t border-dashed border-[#E5D5C5]/40 font-normal">
-                      <p className="font-bold text-luxury-brand bg-luxury-gold/10 p-3 rounded-lg border-l-4 border-luxury-gold">
-                        Vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
-                      </p>
-                      <p className="text-gray-600 text-xs">
-                        Paiement accepté en FCFA, euros ou par carte bancaire.
-                      </p>
-                      <p className="italic text-luxury-gold font-semibold text-xs">
-                        PS : Si annulation, merci de nous prévenir rapidement.
-                      </p>
-                    </div>
-                    <p className="text-gray-500 font-medium text-xs pt-1">
-                      Le transfert aéroport et le change de devises seront confirmés directement avec notre réception.
-                    </p>
-                  </div>
+                          <div className="flex flex-col sm:flex-row justify-between text-xs text-[#4a3e3d] pt-1 gap-1 font-medium border-t border-[#E5D5C5]/30">
+                            <span className="text-gray-600 font-semibold">Modes de paiement acceptés :</span>
+                            <span className="font-bold text-luxury-brand">Carte bancaire, Euro ou monnaie locale</span>
+                          </div>
 
-                  {checkOverlappingDates(bookingForm.roomType, bookingForm.checkIn, bookingForm.checkOut) && (
-                    <div className="bg-[#4a3e3d] border border-luxury-gold/30 text-white rounded-xl p-4 flex gap-3 text-xs leading-relaxed animate-fadeIn">
-                      <span className="text-luxury-gold text-lg">⚠️</span>
-                      <div className="space-y-1 text-left">
-                        <p className="font-bold uppercase tracking-wider text-[10px] text-luxury-gold">Chambre occupée (iCal Sync)</p>
-                        <p className="text-gray-300">Désolé, la catégorie de chambre <strong>{bookingForm.roomType}</strong> est indisponible pour ces dates en raison d'une réservation Booking.com ou en direct. Veuillez ajuster vos dates.</p>
-                      </div>
-                    </div>
-                  )}
+                          <div className="text-xs md:text-sm text-[#2D2726] leading-relaxed space-y-2 pt-2 border-t border-dashed border-[#E5D5C5]/40 font-normal">
+                            <p className="font-bold text-luxury-brand bg-luxury-gold/10 p-3 rounded-lg border-l-4 border-luxury-gold">
+                              Vous ne versez aucun acompte au moment de la réservation. La totalité du séjour sera réglée à votre arrivée à l'hôtel !
+                            </p>
+                            <p className="text-gray-600 text-xs">
+                              Paiement accepté en FCFA, euros ou par carte bancaire.
+                            </p>
+                            <p className="italic text-luxury-gold font-semibold text-xs">
+                              PS : Si annulation, merci de nous prévenir rapidement.
+                            </p>
+                          </div>
+                          <p className="text-gray-500 font-medium text-xs pt-1">
+                            Le transfert aéroport et le change de devises seront confirmés directement avec notre réception.
+                          </p>
+                        </div>
 
-                  {checkOverlappingDates(bookingForm.roomType, bookingForm.checkIn, bookingForm.checkOut) ? (
-                    <button 
-                      type="button"
-                      disabled
-                      className="w-full bg-[#E5D5C5]/10 text-gray-400 py-4 rounded-xl font-bold font-display text-sm uppercase tracking-widest cursor-not-allowed border border-dashed border-gray-400/20"
-                    >
-                      Dates Indisponibles (Vérifier Sync)
-                    </button>
-                  ) : (
-                    <button 
-                      type="submit"
-                      className="w-full bg-luxury-brand text-luxury-gold py-4 rounded-xl font-bold font-display text-sm uppercase tracking-widest hover:bg-luxury-brand/90 hover:text-white transition-all transform duration-150 shadow-lg"
-                    >
-                      Confirmer & Ouvrir WhatsApp Direct
-                    </button>
-                  )}
+                        {anyBlocked && (
+                          <div className="bg-[#4a3e3d] border border-luxury-gold/30 text-white rounded-xl p-4 flex gap-3 text-xs leading-relaxed animate-fadeIn">
+                            <span className="text-luxury-gold text-lg">⚠️</span>
+                            <div className="space-y-1 text-left">
+                              <p className="font-bold uppercase tracking-wider text-[10px] text-luxury-gold">Chambre indisponible (iCal Sync)</p>
+                              <p className="text-gray-300">Au moins une chambre sélectionnée est occupée pour ces dates en raison d'une réservation Booking.com ou en direct. Veuillez ajuster les dates.</p>
+                            </div>
+                          </div>
+                        )}
+
+                        {anyBlocked ? (
+                          <button 
+                            type="button"
+                            disabled
+                            className="w-full bg-[#E5D5C5]/10 text-gray-400 py-4 rounded-xl font-bold font-display text-sm uppercase tracking-widest cursor-not-allowed border border-dashed border-gray-400/20"
+                          >
+                            Dates Indisponibles (Vérifier Sync)
+                          </button>
+                        ) : (
+                          <button 
+                            type="submit"
+                            className="w-full bg-luxury-brand text-luxury-gold py-4 rounded-xl font-bold font-display text-sm uppercase tracking-widest hover:bg-luxury-brand/90 hover:text-white transition-all transform duration-150 shadow-lg"
+                          >
+                            Confirmer & Ouvrir WhatsApp Direct
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                   
                   <div className="flex items-center justify-center gap-2 text-[11px] text-gray-400">
                     <Lock className="w-3.5 h-3.5 text-green-500" />
@@ -1099,8 +1347,8 @@ export default function App() {
                   <Calendar className="w-4 h-4 text-luxury-gold" />
                   <input 
                     type="date" 
-                    value={bookingForm.checkIn}
-                    onChange={(e) => setBookingForm({...bookingForm, checkIn: e.target.value})}
+                    value={bookingRooms[0]?.checkIn || ""}
+                    onChange={(e) => updateBookingRoom(bookingRooms[0]?.id || "room-1", "checkIn", e.target.value)}
                     aria-label="Sélectionner la date d'arrivée"
                     className="bg-transparent border-none text-white text-xs outline-none focus:ring-0 w-full"
                   />
@@ -1113,8 +1361,8 @@ export default function App() {
                   <Calendar className="w-4 h-4 text-luxury-gold" />
                   <input 
                     type="date" 
-                    value={bookingForm.checkOut}
-                    onChange={(e) => setBookingForm({...bookingForm, checkOut: e.target.value})}
+                    value={bookingRooms[0]?.checkOut || ""}
+                    onChange={(e) => updateBookingRoom(bookingRooms[0]?.id || "room-1", "checkOut", e.target.value)}
                     aria-label="Sélectionner la date de départ"
                     className="bg-transparent border-none text-white text-xs outline-none focus:ring-0 w-full"
                   />
@@ -1126,8 +1374,8 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4 text-luxury-gold" />
                   <select 
-                    value={bookingForm.guests}
-                    onChange={(e) => setBookingForm({...bookingForm, guests: e.target.value})}
+                    value={bookingRooms[0]?.guests || "2"}
+                    onChange={(e) => updateBookingRoom(bookingRooms[0]?.id || "room-1", "guests", e.target.value)}
                     aria-label="Sélectionner le nombre d'adultes"
                     className="bg-transparent border-none text-white text-xs outline-none cursor-pointer focus:ring-0 w-full"
                   >
@@ -1144,8 +1392,8 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <CalendarCheck className="w-4 h-4 text-luxury-gold" />
                   <select 
-                    value={bookingForm.roomType}
-                    onChange={(e) => setBookingForm({...bookingForm, roomType: e.target.value})}
+                    value={bookingRooms[0]?.roomType || "Bungalow 1,2 pers."}
+                    onChange={(e) => updateBookingRoom(bookingRooms[0]?.id || "room-1", "roomType", e.target.value)}
                     aria-label="Sélectionner le type de chambre"
                     className="bg-transparent border-none text-white text-xs outline-none cursor-pointer focus:ring-0 w-full"
                   >
@@ -1233,6 +1481,31 @@ export default function App() {
         </div>
       </section>
 
+      {/* Remise Flash Banner Section - Right after About / Welcome */}
+      <section className="bg-gradient-to-r from-amber-50 via-[#FCFAF5] to-amber-100/60 py-12 px-6 border-y border-luxury-gold/30">
+        <div className="max-w-4xl mx-auto text-center space-y-4">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-luxury-gold/15 text-luxury-brand border border-luxury-gold/40 text-xs font-display font-bold uppercase tracking-widest">
+            <Sparkles className="w-4 h-4 text-luxury-gold" />
+            Offre Spéciale Séjour
+          </div>
+          <h2 className="text-3xl md:text-4xl font-serif text-luxury-brand font-bold">
+            🎉 Remise Flash
+          </h2>
+          <p className="text-base md:text-lg text-[#4a3e3d] leading-relaxed max-w-2xl mx-auto font-medium">
+            <strong>20% de réduction</strong> pour toute réservation effectuée au moins <strong>60 jours</strong> avant votre date d'arrivée. Offre valable jusqu'au <strong>31 octobre 2026</strong>.
+          </p>
+          <div className="pt-2">
+            <button 
+              onClick={() => setIsBookingOpen(true)}
+              className="inline-flex items-center gap-2 bg-luxury-brand hover:bg-luxury-brand/90 text-luxury-gold hover:text-white px-8 py-3.5 rounded-full font-display uppercase tracking-widest text-xs font-bold transition-all shadow-md"
+            >
+              <Sparkles className="w-4 h-4" />
+              Profiter de la remise de 20%
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* Services Section - Airport transport and Money change */}
       <section id="services" className="bg-[#4a3e3d]/5 py-24 px-6 border-y border-[#E5D5C5]/20">
         <div className="max-w-7xl mx-auto">
@@ -1254,8 +1527,13 @@ export default function App() {
                 <p className="text-[#8a7a6e] text-sm leading-relaxed font-light mb-4">
                   Si vous le souhaitez, nous vous prenons en charge dès votre arrivée à l'aéroport. Un chauffeur vous y attendra et vous ramènera directement à l'hôtel.
                 </p>
-                <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3 text-xs font-bold mb-6">
-                  ℹ️ Note : Le transfert aéroport est un service optionnel facturé en supplément (non inclus dans le prix de la chambre).
+                <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl p-3.5 text-xs font-medium space-y-1 mb-6">
+                  <p className="font-bold text-luxury-brand">
+                    Tarif : 30 000 FCFA (environ 45$ / 45€) — Distance : 40km entre l'aéroport et l'hôtel. Notre véhicule dispose de 5 places. Pour un groupe de 6 personnes ou plus, deux véhicules seront nécessaires.
+                  </p>
+                  <p className="text-[#8a7a6e] text-[11px]">
+                    ℹ️ Note : Le transfert aéroport est un service optionnel facturé en supplément (non inclus dans le prix de la chambre).
+                  </p>
                 </div>
                 <ul className="space-y-2 text-xs text-luxury-brand font-medium mb-6">
                   <li className="flex items-center gap-2">
@@ -1453,7 +1731,24 @@ export default function App() {
  
                       <button 
                         onClick={() => {
-                          setBookingForm(prev => ({...prev, roomType: room.name}));
+                          setBookingRooms(prev => {
+                            if (prev.length === 0) {
+                              return [{
+                                id: "room-1",
+                                roomType: room.name,
+                                checkIn: "",
+                                checkOut: "",
+                                arrivalTime: "",
+                                guests: room.name.includes("1,2") ? "2" : room.name.includes("familiale") ? "3" : room.name.includes("3,4,5") ? "3" : "2",
+                                childrenCount: "0"
+                              }];
+                            }
+                            return prev.map((r, idx) => idx === 0 ? {
+                              ...r,
+                              roomType: room.name,
+                              guests: room.name.includes("1,2") ? "2" : room.name.includes("familiale") ? "3" : room.name.includes("3,4,5") ? "3" : "2"
+                            } : r);
+                          });
                           setIsBookingOpen(true);
                         }}
                         className="w-full bg-luxury-brand text-luxury-gold group-hover:text-white py-3 rounded-xl font-display font-bold text-xs uppercase tracking-widest transition-all hover:bg-luxury-brand/90 block text-center"
