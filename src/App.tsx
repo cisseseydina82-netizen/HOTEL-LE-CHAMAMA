@@ -54,10 +54,12 @@ import imgFamiliale3 from "./Familiale...JPG";
 import imgQuintuple1 from "./Chambre quintuple.JPG";
 import imgQuintuple2 from "./Cambre quintuple...JPG";
 import imgQuintuple3 from "./Chambre quintuple.....JPG";
+import imgQuintuple4 from "./quintu.jpg";
 
 // Chambre Etage new images
-import imgEtage1 from "./Etage.JPG";
+import imgEtageNew1 from "./PHOTO-2026-08-27-17-16-00.jpg";
 import imgEtage2 from "./Etage..JPG";
+import imgEtage3 from "./eta.JPG";
 
 // Food / Restauration new images
 import imgSteack from "./Steack.jpg";
@@ -68,10 +70,6 @@ import imgRestaurant from "./Restaurant.JPG";
 
 // Robert et Mama
 import imgRobertMama from "./Robert et Mama.jpg";
-
-// New images for Quintuple and Etage rooms
-import imgQuintuple4 from "./quintu.jpg";
-import imgEtage3 from "./eta.JPG";
 
 // Bar new image
 import imgBarNew from "./Bar (1).JPG";
@@ -86,6 +84,13 @@ import imgInterior7 from "./7.JPG";
 import imgActivity18 from "./18.JPG";
 import imgActivity13 from "./13.jpg";
 import imgActivityDer from "./DER.jpg";
+
+// Newly uploaded gallery photos
+import imgGilbert from "./Gilbert.JPG";
+import imgVueExterieure from "./Vue extérieure.JPG";
+import imgVueEtage from "./Vue de l'étage.JPG";
+import imgPresPiscine from "./Près de la piscine.JPG";
+import imgTerrasseBar from "./Terrasse du bar.jpg";
 
 // Interface for booking sync simulation
 interface SyncReservation {
@@ -350,14 +355,23 @@ export default function App() {
     });
   };
 
+  // Robust local date parser (avoids timezone shifts)
+  const parseLocalDate = (dateStr: string): Date | null => {
+    if (!dateStr) return null;
+    const parts = dateStr.split("-").map(Number);
+    if (parts.length !== 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) return null;
+    return new Date(parts[0], parts[1] - 1, parts[2], 0, 0, 0, 0);
+  };
+
   // Helper function to calculate stays
   const countNights = (inDate: string, outDate: string) => {
     if (!inDate || !outDate) return 0;
-    const start = new Date(inDate);
-    const end = new Date(outDate);
+    const start = parseLocalDate(inDate);
+    const end = parseLocalDate(outDate);
+    if (!start || !end) return 0;
     const diff = end.getTime() - start.getTime();
     if (diff <= 0) return 0;
-    return Math.ceil(diff / (1000 * 60 * 60 * 24));
+    return Math.round(diff / (1000 * 60 * 60 * 24));
   };
 
   const getEstimatedRate = (roomType: string, guestsStr: string): number => {
@@ -412,19 +426,24 @@ export default function App() {
   };
 
   // Helper to check if Flash Discount (-20%) is applicable
-  // Condition: check-in is at least 60 days from today AND booking is made before or on 31 October 2026
+  // Condition:
+  // (a) La date d'arrivée sélectionnée est au moins 60 jours après la date du jour (diffDays >= 60)
+  // (b) La réservation est faite avant le 31 octobre 2026 inclus (today <= 31 Oct 2026)
   const isFlashDiscountApplicable = (checkInStr: string): boolean => {
     if (!checkInStr) return false;
+    
+    // Normalize today's date at 00:00:00 local time
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const deadline = new Date("2026-10-31T23:59:59");
-    if (today > deadline) return false;
+    // Deadline: 31 October 2026 at 23:59:59 (Month 9 is October in 0-indexed JS)
+    const deadline = new Date(2026, 9, 31, 23, 59, 59, 999);
+    if (today.getTime() > deadline.getTime()) return false;
 
-    const checkInDate = new Date(checkInStr);
-    if (isNaN(checkInDate.getTime())) return false;
+    const checkInDate = parseLocalDate(checkInStr);
+    if (!checkInDate) return false;
 
-    const diffDays = Math.ceil((checkInDate.getTime() - today.getTime()) / (1000 * 3600 * 24));
+    const diffDays = Math.round((checkInDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     return diffDays >= 60;
   };
 
@@ -438,7 +457,8 @@ export default function App() {
       const rate = getEstimatedRate(room.roomType, room.guests);
       const roomTotal = nights > 0 ? rate * nights : 0;
       rawTotalPrice += roomTotal;
-      if (isFlashDiscountApplicable(room.checkIn)) {
+      const isPromo = isFlashDiscountApplicable(room.checkIn);
+      if (isPromo) {
         anyRoomHasFlashPromo = true;
       }
       return {
@@ -446,7 +466,8 @@ export default function App() {
         room,
         nights,
         rate,
-        roomTotal
+        roomTotal,
+        hasFlashPromo: isPromo
       };
     });
 
@@ -459,8 +480,46 @@ export default function App() {
       rawTotalPrice,
       isFlashDiscount,
       discountAmount,
-      finalTotalPrice
+      finalTotalPrice,
+      anyRoomHasFlashPromo
     };
+  };
+
+  // Action for Flash Offer CTA banner button
+  const openBookingWithFlashOffer = () => {
+    const today = new Date();
+    const dIn = new Date(today);
+    dIn.setDate(today.getDate() + 65);
+    const dOut = new Date(today);
+    dOut.setDate(today.getDate() + 68);
+
+    const pad = (n: number) => n < 10 ? `0${n}` : `${n}`;
+    const checkInFormatted = `${dIn.getFullYear()}-${pad(dIn.getMonth() + 1)}-${pad(dIn.getDate())}`;
+    const checkOutFormatted = `${dOut.getFullYear()}-${pad(dOut.getMonth() + 1)}-${pad(dOut.getDate())}`;
+
+    setBookingRooms(prev => {
+      if (prev.length === 0) {
+        return [{
+          id: "room-1",
+          roomType: "Bungalow 1,2 pers.",
+          checkIn: checkInFormatted,
+          checkOut: checkOutFormatted,
+          arrivalTime: "",
+          guests: "2",
+          childrenCount: "0"
+        }];
+      }
+      // If current checkIn is empty or not yet 60 days ahead, pre-fill with a valid 65-day advance date
+      if (!prev[0]?.checkIn || !isFlashDiscountApplicable(prev[0].checkIn)) {
+        return prev.map((r, idx) => idx === 0 ? {
+          ...r,
+          checkIn: checkInFormatted,
+          checkOut: checkOutFormatted
+        } : r);
+      }
+      return prev;
+    });
+    setIsBookingOpen(true);
   };
 
   // Format booking submit to official hotel WhatsApp with Multi-Room & Flash Discount support
@@ -597,7 +656,7 @@ export default function App() {
       priceEUR: "41 / 58 / 73",
       capacity: "1, 2 ou 3 Personnes",
       size: "30 m²",
-      images: [imgEtage1, imgEtage2, imgEtage3],
+      images: [imgEtageNew1, imgEtage2, imgEtage3],
       features: ["Style plus classique", "Salle de bain et WC séparés", "un lit double + un lit simple", "Climatisation & Télévision"],
       description: "4 grandes chambres d'un style plus classique, d'un standing plus élevé, d'une dimension de 30m², à réserver pour 1, 2 ou 3 personnes. Mêmes équipements que les bungalows."
     }
@@ -619,23 +678,28 @@ export default function App() {
 
   // Comprehensive image gallery (categorized)
   const GALLERY_DATA = [
-    // Pool only: 15, 16, 17
+    // Pool
     { type: "pool", src: imgPool15, title: "L'Espace Piscine" },
     { type: "pool", src: imgPool16, title: "Bord de l'Eau" },
     { type: "pool", src: imgPool17, title: "La Piscine au Crépuscule" },
+    { type: "pool", src: imgPresPiscine, title: "Détente Près de la Piscine" },
     
-    // Interiors & Bar: 2, 3, 4, 5, 7 + Bar (1).JPG
+    // Interiors, Bar & Cadre
     { type: "interior", src: imgInterior2, title: "Espace Détente" },
     { type: "interior", src: imgInterior3, title: "Séjour de l'Auberge" },
     { type: "interior", src: imgInterior4, title: "Espace d'Accueil" },
     { type: "interior", src: imgInterior5, title: "Ambiance Chaleureuse" },
     { type: "interior", src: imgInterior7, title: "La Décoration" },
     { type: "interior", src: imgBarNew, title: "Le Bar Convivial" },
+    { type: "interior", src: imgTerrasseBar, title: "La Terrasse du Bar" },
+    { type: "interior", src: imgVueExterieure, title: "Vue Extérieure de l'Auberge" },
+    { type: "interior", src: imgVueEtage, title: "Vue Panoramique depuis l'Étage" },
     
-    // Activities: 13.jpg, 18.JPG, DER.jpg
-    { type: "activities", src: imgActivity13, title: "" },
-    { type: "activities", src: imgActivity18, title: "" },
-    { type: "activities", src: imgActivityDer, title: "" }
+    // Activities & Ambiance
+    { type: "activities", src: imgGilbert, title: "L'Accueil & Ambiance au Chamama" },
+    { type: "activities", src: imgActivity13, title: "Moments de Partage" },
+    { type: "activities", src: imgActivity18, title: "Escapade & Découvertes" },
+    { type: "activities", src: imgActivityDer, title: "Balades & Détente" }
   ];
 
   const filteredGallery = activeTab === "all" 
@@ -1496,7 +1560,7 @@ export default function App() {
           </p>
           <div className="pt-2">
             <button 
-              onClick={() => setIsBookingOpen(true)}
+              onClick={openBookingWithFlashOffer}
               className="inline-flex items-center gap-2 bg-luxury-brand hover:bg-luxury-brand/90 text-luxury-gold hover:text-white px-8 py-3.5 rounded-full font-display uppercase tracking-widest text-xs font-bold transition-all shadow-md"
             >
               <Sparkles className="w-4 h-4" />
