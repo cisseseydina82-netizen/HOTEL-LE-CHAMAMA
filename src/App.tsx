@@ -425,6 +425,16 @@ export default function App() {
     setBookingRooms(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
   };
 
+  // Helper to get number of days between today and check-in date
+  const getDaysUntilArrival = (checkInStr: string): number | null => {
+    if (!checkInStr) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const checkIn = parseLocalDate(checkInStr);
+    if (!checkIn) return null;
+    return Math.round((checkIn.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
   // Helper to check if Flash Discount (-20%) is applicable
   // Condition:
   // (a) La date d'arrivée sélectionnée est au moins 60 jours après la date du jour (diffDays >= 60)
@@ -440,10 +450,8 @@ export default function App() {
     const deadline = new Date(2026, 9, 31, 23, 59, 59, 999);
     if (today.getTime() > deadline.getTime()) return false;
 
-    const checkInDate = parseLocalDate(checkInStr);
-    if (!checkInDate) return false;
-
-    const diffDays = Math.round((checkInDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const diffDays = getDaysUntilArrival(checkInStr);
+    if (diffDays === null) return false;
     return diffDays >= 60;
   };
 
@@ -1015,6 +1023,32 @@ export default function App() {
                                     className="w-full bg-white border border-[#a38760]/20 rounded-xl p-2.5 focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/50 outline-none text-xs transition-all" 
                                   />
                                 </div>
+                                {(() => {
+                                  const diffDays = getDaysUntilArrival(room.checkIn);
+                                  if (diffDays === null) return null;
+                                  if (diffDays >= 60) {
+                                    return (
+                                      <div className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-300 text-emerald-800 text-[11px] font-semibold">
+                                        <Sparkles className="w-3 h-3 text-emerald-600" />
+                                        Arrivée dans {diffDays} jours &bull; <strong>Remise Flash (-20%) activée !</strong>
+                                      </div>
+                                    );
+                                  } else if (diffDays >= 0) {
+                                    return (
+                                      <div className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px]">
+                                        <span>ℹ️</span>
+                                        <span>Arrivée dans <strong>{diffDays} jour{diffDays > 1 ? "s" : ""}</strong> (Tarif standard — Remise de 20% dès 60 jours d'avance)</span>
+                                      </div>
+                                    );
+                                  } else {
+                                    return (
+                                      <div className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-50 border border-red-200 text-red-700 text-[11px]">
+                                        <span>⚠️</span>
+                                        <span>Date d'arrivée déjà passée</span>
+                                      </div>
+                                    );
+                                  }
+                                })()}
                               </div>
 
                               <div className="space-y-1">
@@ -1259,18 +1293,28 @@ export default function App() {
                                 </div>
                               </div>
                             ) : (
-                              <div className="flex justify-between items-center font-bold text-luxury-brand text-sm md:text-base">
-                                <span>Montant total à payer :</span>
-                                <div className="text-right">
-                                  <span className="text-luxury-gold font-display text-lg md:text-xl block">
-                                    {summary.finalTotalPrice.toLocaleString()} FCFA
-                                  </span>
-                                  {summary.finalTotalPrice > 0 && (
-                                    <span className="text-xs text-gray-500 font-normal">
-                                      (~{Math.round(summary.finalTotalPrice / 655.957)} €)
+                              <div className="space-y-2">
+                                <div className="flex justify-between items-center font-bold text-luxury-brand text-sm md:text-base">
+                                  <span>Montant total à payer :</span>
+                                  <div className="text-right">
+                                    <span className="text-luxury-gold font-display text-lg md:text-xl block">
+                                      {summary.finalTotalPrice.toLocaleString()} FCFA
                                     </span>
-                                  )}
+                                    {summary.finalTotalPrice > 0 && (
+                                      <span className="text-xs text-gray-500 font-normal">
+                                        (~{Math.round(summary.finalTotalPrice / 655.957)} €)
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
+                                {bookingRooms[0]?.checkIn && (
+                                  <div className="bg-amber-50/70 border border-amber-200/80 text-amber-900 rounded-xl p-2.5 text-[11px] flex items-center gap-2">
+                                    <span>💡</span>
+                                    <span>
+                                      <strong>Astuce Remise Flash :</strong> Réservez au moins 60 jours à l'avance (ex: séjour fin octobre, novembre, décembre...) pour profiter de <strong>-20% de remise immédiate</strong> sur votre séjour.
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
